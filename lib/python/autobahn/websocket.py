@@ -28,6 +28,8 @@ import os
 from collections import deque
 from utf8validator import Utf8Validator
 
+CRLF = "\x0d\x0a"
+END_HEADERS = CRLF + CRLF
 
 class FrameHeader:
 
@@ -296,20 +298,20 @@ class WebSocketProtocol(protocol.Protocol):
       :type reason: str
       """
       if self.debugCodePaths:
-         s = "WebSocketProtocol.onClose:\n"
-         s += "wasClean=%s\n" % wasClean
-         s += "code=%s\n" % code
-         s += "reason=%s\n" % reason
-         s += "self.closedByMe=%s\n" % self.closedByMe
-         s += "self.failedByMe=%s\n" % self.failedByMe
-         s += "self.droppedByMe=%s\n" % self.droppedByMe
-         s += "self.wasClean=%s\n" % self.wasClean
-         s += "self.wasNotCleanReason=%s\n" % self.wasNotCleanReason
-         s += "self.localCloseCode=%s\n" % self.localCloseCode
-         s += "self.localCloseReason=%s\n" % self.localCloseReason
-         s += "self.remoteCloseCode=%s\n" % self.remoteCloseCode
-         s += "self.remoteCloseReason=%s\n" % self.remoteCloseReason
-         log.msg(s)
+         s = ("WebSocketProtocol.onClose:",
+              "wasClean=%s" % wasClean,
+              "code=%s" % code,
+              "reason=%s" % reason,
+              "self.closedByMe=%s" % self.closedByMe,
+              "self.failedByMe=%s" % self.failedByMe,
+              "self.droppedByMe=%s" % self.droppedByMe,
+              "self.wasClean=%s" % self.wasClean,
+              "self.wasNotCleanReason=%s" % self.wasNotCleanReason,
+              "self.localCloseCode=%s" % self.localCloseCode,
+              "self.localCloseReason=%s" % self.localCloseReason,
+              "self.remoteCloseCode=%s" % self.remoteCloseCode,
+              "self.remoteCloseReason=%s" % self.remoteCloseReason)
+         log.msg("\n".join(s))
 
 
    def onCloseFrame(self, code, reason):
@@ -1526,7 +1528,7 @@ class WebSocketServerProtocol(WebSocketProtocol):
       """
       ## only proceed when we have fully received the HTTP request line and all headers
       ##
-      end_of_header = self.data.find("\x0d\x0a\x0d\x0a")
+      end_of_header = self.data.find(END_HEADERS)
       if end_of_header >= 0:
 
          ## extract HTTP headers
@@ -1689,15 +1691,17 @@ class WebSocketServerProtocol(WebSocketProtocol):
 
          ## send response to complete WebSocket handshake
          ##
-         response  = "HTTP/1.1 101 Switching Protocols\x0d\x0a"
-         response += "Upgrade: websocket\x0d\x0a"
-         response += "Connection: Upgrade\x0d\x0a"
-         response += "Sec-WebSocket-Accept: %s\x0d\x0a" % sec_websocket_accept
+         response_headers  = [
+            "HTTP/1.1 101 Switching Protocols",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            "Sec-WebSocket-Accept: %s" % sec_websocket_accept
+         ]
 
          if protocol:
-            response += "Sec-WebSocket-Protocol: %s\x0d\x0a" % protocol
+            response_headers.append("Sec-WebSocket-Protocol: %s" % protocol)
 
-         response += "\x0d\x0a"
+         response = CRLF.join(response_headers) + END_HEADERS
 
          self.sendData(response)
 
@@ -1732,8 +1736,7 @@ class WebSocketServerProtocol(WebSocketProtocol):
       """
       Send out HTTP error response.
       """
-      response  = "HTTP/1.1 %d %s\x0d\x0a" % (code, reason)
-      response += "\x0d\x0a"
+      response  = ("HTTP/1.1 %d %s%s") % (code, reason, END_HEADERS)
       self.sendData(response)
 
 
@@ -1833,41 +1836,41 @@ class WebSocketClientProtocol(WebSocketProtocol):
 
       ## construct WS opening handshake HTTP header
       ##
-      request  = "GET %s HTTP/1.1\x0d\x0a" % self.factory.path.encode("utf-8")
+      request_headers  = ["GET %s HTTP/1.1" % self.factory.path.encode("utf-8")]
 
       if self.factory.useragent:
-         request += "User-Agent: %s\x0d\x0a" % self.factory.useragent.encode("utf-8")
+         request_headers.append("User-Agent: %s" % self.factory.useragent.encode("utf-8"))
 
-      request += "Host: %s\x0d\x0a" % self.factory.host.encode("utf-8")
-      request += "Upgrade: websocket\x0d\x0a"
-      request += "Connection: Upgrade\x0d\x0a"
+      request_headers.append("Host: %s" % self.factory.host.encode("utf-8"))
+      request_headers.append("Upgrade: websocket")
+      request_headers.append("Connection: Upgrade")
 
       ## handshake random key
       ##
       self.websocket_key = base64.b64encode(os.urandom(16))
-      request += "Sec-WebSocket-Key: %s\x0d\x0a" % self.websocket_key
+      request_headers.append("Sec-WebSocket-Key: %s" % self.websocket_key)
 
       ## optional origin announced
       ##
       if self.factory.origin:
          if self.factory.version > 10:
-            request += "Origin: %d\x0d\x0a" % self.factory.origin.encode("utf-8")
+            request_headers.append("Origin: %d" % self.factory.origin.encode("utf-8"))
          else:
-            request += "Sec-WebSocket-Origin: %d\x0d\x0a" % self.factory.origin.encode("utf-8")
+            request_headers.append("Sec-WebSocket-Origin: %d" % self.factory.origin.encode("utf-8"))
 
       ## optional list of WS subprotocols announced
       ##
       if len(self.factory.subprotocols) > 0:
-         request += "Sec-WebSocket-Protocol: %s\x0d\x0a" % ','.join(self.factory.subprotocols)
+         request_headers.append("Sec-WebSocket-Protocol: %s" % ','.join(self.factory.subprotocols))
 
       ## set WS protocol version depending on WS spec version
       ##
       if self.factory.version < 13:
-         request += "Sec-WebSocket-Version: %d\x0d\x0a" % 8
+         request_headers.append("Sec-WebSocket-Version: 8")
       else:
-         request += "Sec-WebSocket-Version: %d\x0d\x0a" % 13
+         request_headers.append("Sec-WebSocket-Version: 13")
 
-      request += "\x0d\x0a"
+      request = CRLF.join(reqeust_headers) + END_HEADERS
 
       if self.debug:
          log.msg(request)
